@@ -23,6 +23,12 @@ dependencies = [
 
 incdirs = include_directories(['Inc', 'Inc/external'])
 
+if host_machine.system() == 'darwin'
+    dependencies += dependency('libdwarf')
+else
+    dependencies += subproject('libdwarf').get_variable('libdwarf')
+endif
+
 if host_machine.system() == 'windows'
 elif host_machine.system() == 'darwin'
     add_project_arguments('-DOSX', language: 'c')
@@ -44,8 +50,7 @@ add_project_arguments('-Wno-error=deprecated-declarations', language: 'c')
 add_project_arguments(['-include', 'uicolours_default.h'], language: 'c')
 
 
-libdwarf = subproject('libdwarf').get_variable('libdwarf')
-dependencies += libdwarf
+
 
 if host_machine.system() == 'windows'
     stream_src = [
