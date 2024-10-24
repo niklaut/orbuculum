@@ -352,6 +352,7 @@ static void _processFunctionDie( struct symbol *p, Dwarf_Debug dbg, Dwarf_Die di
 
     Dwarf_Attribute attr_data;
     Dwarf_Half attr_tag;
+    Dwarf_Die name_die = die;
     bool isinline = false;
     struct symbolFunctionStore *newFunc;
 
@@ -369,14 +370,15 @@ static void _processFunctionDie( struct symbol *p, Dwarf_Debug dbg, Dwarf_Die di
         attr_tag = DW_AT_abstract_origin;
         dwarf_attr( die, attr_tag, &attr_data, 0 );
         dwarf_global_formref( attr_data, &abstract_origin_offset, 0 );
-        dwarf_offdie_b( dbg, abstract_origin_offset, IS_INFO, &abstract_origin_die, 0 );
-        isinline = true;
+        if (DW_DLV_OK == dwarf_offdie_b( dbg, abstract_origin_offset, IS_INFO, &abstract_origin_die, 0 ))
+        {
+            isinline = true;
+            name_die = abstract_origin_die;
+        }
     }
-    else
-    {
-        dwarf_highpc_b ( die, &h, 0, &formclass, 0 );
-        dwarf_lowpc ( die, &l, 0 );
-    }
+
+    dwarf_highpc_b ( die, &h, 0, &formclass, 0 );
+    dwarf_lowpc ( die, &l, 0 );
 
     if ( formclass == DW_FORM_CLASS_CONSTANT )
     {
@@ -391,14 +393,14 @@ static void _processFunctionDie( struct symbol *p, Dwarf_Debug dbg, Dwarf_Die di
         dwarf_formstring( attr_data, &manglename, 0 );
     }
 
-    if ( DW_DLV_OK != dwarf_diename( die, &name, 0 ) )
+    if ( DW_DLV_OK != dwarf_diename( name_die, &name, 0 ) )
     {
         /* Name will be hidden in a specification reference */
         attr_tag = DW_AT_specification;
 
-        if ( dwarf_attr( die, attr_tag, &attr_data, 0 ) == DW_DLV_OK )
+        if ( dwarf_attr( name_die, attr_tag, &attr_data, 0 ) == DW_DLV_OK )
         {
-            dwarf_attr( die, attr_tag, &attr_data, 0 );
+            dwarf_attr( name_die, attr_tag, &attr_data, 0 );
 
             if ( DW_DLV_OK == dwarf_global_formref( attr_data, &specification_offset, 0 ) )
             {
@@ -449,13 +451,19 @@ static void _processFunctionDie( struct symbol *p, Dwarf_Debug dbg, Dwarf_Die di
 
 // ====================================================================================================
 
-static void _processDie( struct symbol *p, Dwarf_Debug dbg, Dwarf_Die die, int level, int filenameN, int producerN, Dwarf_Addr cu_base_addr )
+static void _processDie( struct symbol *p, Dwarf_Debug dbg, Dwarf_Die die, int level, int filenameN,char *name, int producerN, Dwarf_Addr cu_base_addr )
 
 {
     Dwarf_Half tag;
     Dwarf_Die child;
 
     Dwarf_Die sib = die;
+
+    // arm_exception is filename and funcname handle this
+    if ( strstr( name, "arm_exception" ) )
+    {
+        _processFunctionDie(p,dbg,sib,filenameN,producerN,cu_base_addr);
+    }
 
     while ( DW_DLV_OK == dwarf_siblingof_b( dbg, sib, IS_INFO, &sib, 0 ) )
     {
@@ -471,7 +479,7 @@ static void _processDie( struct symbol *p, Dwarf_Debug dbg, Dwarf_Die die, int l
 
     if ( DW_DLV_OK == dwarf_child( die, &child, 0 ) )
     {
-        _processDie( p, dbg, child, level + 1, filenameN, producerN, cu_base_addr );
+        _processDie( p, dbg, child, level + 1, filenameN,name, producerN, cu_base_addr );
         dwarf_dealloc( dbg, child, DW_DLA_DIE );
     }
 }
@@ -535,6 +543,10 @@ static bool _readLines( struct symbol *p )
     unsigned int filenameN;
     unsigned int producerN;
 
+    Dwarf_Addr h = 0;
+    Dwarf_Addr l = 0;
+    enum Dwarf_Form_Class formclass = DW_FORM_CLASS_UNKNOWN;
+
     if ( 0 != dwarf_init_b( p->fd, DW_GROUPNUMBER_ANY, NULL, NULL, &dbg, &err ) )
     {
         return false;
@@ -576,6 +588,7 @@ static bool _readLines( struct symbol *p )
         dwarf_siblingof_b( dbg, NULL, IS_INFO, &cu_die, 0 );
 
         dwarf_diename( cu_die, &name, 0 );
+
         dwarf_die_text( cu_die, DW_AT_producer, &producer, 0 );
         dwarf_die_text( cu_die, DW_AT_comp_dir, &compdir, 0 );
 
@@ -588,7 +601,7 @@ static bool _readLines( struct symbol *p )
         /* Kickoff the process for the DIE and its children to get the functions in this cu */
 
         dwarf_lowpc( cu_die, &cu_low_addr, 0 );
-        _processDie( p, dbg, cu_die, 0, filenameN, producerN, cu_low_addr );
+        _processDie( p, dbg, cu_die, 0, filenameN, name, producerN, cu_low_addr );
 
         /* ...and the source lines */
         _getSourceLines( p, dbg, cu_die );
@@ -975,11 +988,9 @@ void symbolDelete( struct symbol *p )
 }
 
 // ====================================================================================================
-
-char *symbolDisassembleLine( struct symbol *p, enum instructionClass *ic, symbolMemaddr addr, symbolMemaddr *newaddr )
+char *symbolDisassembleLine( struct symbol *p, enum instructionClass *ic, symbolMemaddr addr, symbolMemaddr *newaddr)
 
 /* Return assembly code representing this line */
-
 {
     cs_insn *insn;
     size_t count;
@@ -995,7 +1006,7 @@ char *symbolDisassembleLine( struct symbol *p, enum instructionClass *ic, symbol
     if ( !p->caphandle )
     {
         /* Disassembler isn't initialised yet */
-        if ( cs_open( CS_ARCH_ARM, CS_MODE_THUMB + CS_MODE_LITTLE_ENDIAN, &p->caphandle ) != CS_ERR_OK )
+        if ( cs_open( CS_ARCH_ARM, CS_MODE_THUMB + CS_MODE_LITTLE_ENDIAN + CS_MODE_MCLASS, &p->caphandle ) != CS_ERR_OK )
         {
             return NULL;
         }
@@ -1011,9 +1022,9 @@ char *symbolDisassembleLine( struct symbol *p, enum instructionClass *ic, symbol
         return NULL;
     }
 
+    // This line disassembles the code with the handler initialised above
     count = cs_disasm( p->caphandle, m, 4, addr, 0, &insn );
     *ic = LE_IC_NONE;
-
 
     if ( count > 0 )
     {
@@ -1026,18 +1037,30 @@ char *symbolDisassembleLine( struct symbol *p, enum instructionClass *ic, symbol
         *ic |= ( ( insn->id == ARM_INS_BL ) || ( insn->id == ARM_INS_BLX ) ) ? LE_IC_JUMP | LE_IC_CALL : 0;
 
         /* Was it a regular call? */
-        *ic |= ( ( insn->id == ARM_INS_B )    || ( insn->id == ARM_INS_BX )  || ( insn->id == ARM_INS_ISB ) ||
+        *ic |= ( ( insn->id == ARM_INS_B )    || ( insn->id == ARM_INS_BX )  || 
                  ( insn->id == ARM_INS_WFI )  || ( insn->id == ARM_INS_WFE ) || ( insn->id == ARM_INS_TBB ) ||
                  ( insn->id == ARM_INS_TBH )  || ( insn->id == ARM_INS_BXJ ) || ( insn->id == ARM_INS_CBZ ) ||
                  ( insn->id == ARM_INS_CBNZ ) || ( insn->id == ARM_INS_WFI ) || ( insn->id == ARM_INS_WFE )
                ) ? LE_IC_JUMP : 0;
-
         *ic |=  (
                             ( ( ( insn->id == ARM_INS_SUB ) || ( insn->id == ARM_INS_MOV ) ||
-                                ( insn->id == ARM_INS_LDM ) || ( insn->id == ARM_INS_POP ) )
+                                ( insn->id == ARM_INS_LDM ) || ( insn->id == ARM_INS_POP ) ||
+                                ( insn->id == ARM_INS_ISB ) || ( insn->id == ARM_INS_ORR ) )
                               && strstr( insn->op_str, "pc" ) )
                 ) ? LE_IC_JUMP : 0;
+        *ic |=  (
+                            ( ( insn->id == ARM_INS_ISB ) && strstr( insn->op_str, "sy" ) ) 
+                ) ? LE_IC_SYNC_BARRIER : 0;
+        *ic |=  (insn->id == ARM_INS_STC2L) ? LE_IC_COPROCESSOR : 0;
 
+        /* create a copy to check if load in pc */
+        char *copy = strdup(insn->op_str);
+        *ic |=  (
+                            ( ( ( insn->id == ARM_INS_LDR ) )
+                              && strstr(strtok(copy,","), "pc" ) )
+                ) ? LE_IC_JUMP : 0;
+        /* free the copy */
+        free(copy);
         /* Was it an exception return? */
         *ic |=  ( ( insn->id == ARM_INS_ERET ) ) ? LE_IC_JUMP | LE_IC_IRET : 0;
 
@@ -1057,19 +1080,21 @@ char *symbolDisassembleLine( struct symbol *p, enum instructionClass *ic, symbol
 
         if ( detail->arm.op_count )
         {
-
             for ( int n = 0; n <  insn->detail->arm.op_count; n++ )
             {
-                if ( insn->detail->arm.operands[n].type == ARM_OP_IMM )
+                if (n<2)
                 {
-                    *ic |= LE_IC_IMMEDIATE;
-
-                    if ( newaddr )
+                    if ( insn->detail->arm.operands[n].type == ARM_OP_IMM )
                     {
-                        *newaddr = detail->arm.operands[0].imm;
-                    }
+                        *ic |= LE_IC_IMMEDIATE;
 
-                    break;
+                        if ( newaddr )
+                        {
+                            *newaddr = detail->arm.operands[n].imm;
+                        }
+
+                        break;
+                    }
                 }
             }
         }
@@ -1087,7 +1112,6 @@ char *symbolDisassembleLine( struct symbol *p, enum instructionClass *ic, symbol
     }
 
     cs_free( insn, count );
-
     return op;
 }
 

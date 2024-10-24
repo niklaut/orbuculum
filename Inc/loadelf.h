@@ -1,5 +1,6 @@
 
 #ifndef _LOADELF_H_
+#define _LOADELF_H_
 
 #include <stdbool.h>
 #include <capstone/capstone.h>
@@ -88,7 +89,7 @@ struct symbol
     csh caphandle;
 };
 
-enum instructionClass { LE_IC_NONE, LE_IC_JUMP = ( 1 << 0 ), LE_IC_4BYTE = ( 1 << 1 ), LE_IC_CALL = ( 1 << 2 ),  LE_IC_IMMEDIATE = ( 1 << 3 ), LE_IC_IRET = ( 1 << 4 ) };
+enum instructionClass { LE_IC_NONE, LE_IC_JUMP = ( 1 << 0 ), LE_IC_4BYTE = ( 1 << 1 ), LE_IC_CALL = ( 1 << 2 ),  LE_IC_IMMEDIATE = ( 1 << 3 ), LE_IC_IRET = ( 1 << 4 ), LE_IC_SYNC_BARRIER = ( 1 << 5 ), LE_IC_COPROCESSOR = ( 1 << 6 )};
 
 // ====================================================================================================
 
@@ -120,7 +121,7 @@ const char *symbolGetFilename( struct symbol *p, unsigned int index );
 symbolMemptr symbolCodeAt( struct symbol *p, symbolMemaddr addr, unsigned int *len );
 
 /* Return assembly code representing this line, with annotations */
-char *symbolDisassembleLine( struct symbol *p, enum instructionClass *ic, symbolMemaddr addr, symbolMemaddr *newaddr );
+char *symbolDisassembleLine( struct symbol *p, enum instructionClass *ic, symbolMemaddr addr, symbolMemaddr *newaddr);
 
 /* Delete symbol set */
 void symbolDelete( struct symbol *p );

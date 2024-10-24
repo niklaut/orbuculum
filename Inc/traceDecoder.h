@@ -54,6 +54,7 @@ enum TRACEchanges
     EV_CH_VMID,
     EV_CH_TSTAMP,
     EV_CH_CYCLECOUNT,
+    EV_CH_ASYNC,
     EV_CH_CONTEXTID,
     EV_CH_TRIGGER,
     EV_CH_SECURE,
@@ -143,6 +144,10 @@ struct TRACECPUState
 
     // Convinience, for debug reporting
     genericsReportCB report;
+
+    // Debugging
+    uint64_t overflows;       
+    uint64_t ASyncs; 
 };
 
 // ============================================================================
@@ -163,7 +168,7 @@ struct TRACEDecoderEngine
     const char ( *name )    ( void );
 
     /* Config specific to ETM3.5 */
-    void ( *altAddrEncode ) ( struct TRACEDecoderEngine *e, bool using );
+    void ( *altAddrEncode ) ( struct TRACEDecoderEngine *e, bool _using );
 };
 
 struct TRACEDecoder
